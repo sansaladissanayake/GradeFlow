@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { getSubjects, addSubject } from "@/lib/api";
 
 interface Subject {
   id: string;
@@ -17,42 +18,74 @@ export default function SemesterDetailsPage() {
   const params = useParams();
   const id = params.id as string;
   
-  // Mock data for MVP
-  const [subjects, setSubjects] = useState<Subject[]>([
-    { id: "1", code: "IS1102", name: "Intro to Information Systems", credits: 3, grade: "A", gradePoint: 4.0 },
-    { id: "2", code: "IS1103", name: "Programming Fundamentals", credits: 3, grade: "A-", gradePoint: 3.7 },
-  ]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [newSubCode, setNewSubCode] = useState("");
   const [newSubName, setNewSubName] = useState("");
   const [newCredits, setNewCredits] = useState("3");
   const [newGrade, setNewGrade] = useState("A");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const fetchSubjects = async () => {
+      const userId = localStorage.getItem("gradeflow_user_id");
+      if (!userId) return;
+      
+      const res = await getSubjects(userId);
+      if (res.status === "success" && res.data) {
+        // Filter by semester_id
+        const semSubjects = res.data.filter((s: any) => s.semester_id === id);
+        setSubjects(semSubjects);
+      }
+      setLoading(false);
+    };
+    
+    fetchSubjects();
+  }, [id]);
 
   const gpa = subjects.length 
     ? (subjects.reduce((acc, sub) => acc + sub.credits * sub.gradePoint, 0) / 
        subjects.reduce((acc, sub) => acc + sub.credits, 0)).toFixed(2)
     : "0.00";
 
-  const handleAddSubject = (e: React.FormEvent) => {
+  const handleAddSubject = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Very simple mock grade point mapping
+    setIsSubmitting(true);
+    
+    const userId = localStorage.getItem("gradeflow_user_id");
+    
     const gradePoints: Record<string, number> = {
       "A+": 4.0, "A": 4.0, "A-": 3.7, "B+": 3.3, "B": 3.0, "B-": 2.7, "C+": 2.3, "C": 2.0, "C-": 1.7, "D": 1.0, "F": 0.0
     };
     
-    setSubjects([...subjects, {
-      id: Date.now().toString(),
+    const newId = Date.now().toString();
+    const gPoint = gradePoints[newGrade] || 0;
+    
+    const subjectData = {
+      id: newId,
+      semester_id: id,
+      user_id: userId,
       code: newSubCode,
       name: newSubName,
       credits: parseInt(newCredits),
       grade: newGrade,
-      gradePoint: gradePoints[newGrade] || 0
-    }]);
+      gradePoint: gPoint
+    };
     
-    setShowAddModal(false);
-    setNewSubCode("");
-    setNewSubName("");
+    const res = await addSubject(subjectData);
+    
+    if (res.status === "success") {
+      setSubjects([...subjects, subjectData]);
+      setShowAddModal(false);
+      setNewSubCode("");
+      setNewSubName("");
+    } else {
+      alert("Error adding subject: " + res.message);
+    }
+    
+    setIsSubmitting(false);
   };
 
   return (
@@ -70,8 +103,7 @@ export default function SemesterDetailsPage() {
         
         <div className="flex justify-between items-end">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Semester {id}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Year 1</p>
+            <h1 className="text-3xl font-bold text-foreground truncate max-w-[150px]">Semester {id}</h1>
           </div>
           <div className="bg-gradient-to-br from-primary-600 to-accent-500 p-[2px] rounded-2xl shadow-lg shadow-primary-500/20">
             <div className="bg-white dark:bg-slate-900 px-4 py-2 rounded-[14px]">
@@ -93,7 +125,11 @@ export default function SemesterDetailsPage() {
           </button>
         </div>
 
-        {subjects.length === 0 ? (
+        {loading ? (
+          <div className="flex justify-center p-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+          </div>
+        ) : subjects.length === 0 ? (
           <div className="glass-card p-8 rounded-3xl text-center border border-dashed border-slate-300 dark:border-slate-700">
             <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -192,9 +228,10 @@ export default function SemesterDetailsPage() {
 
               <button 
                 type="submit"
-                className="w-full py-3.5 mt-2 bg-gradient-to-r from-primary-600 to-primary-500 text-white rounded-xl font-semibold shadow-lg shadow-primary-500/30"
+                disabled={isSubmitting}
+                className="w-full py-3.5 mt-2 bg-gradient-to-r from-primary-600 to-primary-500 text-white rounded-xl font-semibold shadow-lg shadow-primary-500/30 disabled:opacity-70"
               >
-                Save Subject
+                {isSubmitting ? "Saving..." : "Save Subject"}
               </button>
             </form>
           </div>

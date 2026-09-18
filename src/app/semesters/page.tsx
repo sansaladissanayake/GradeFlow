@@ -1,43 +1,76 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import { getSemesters, addSemester } from "@/lib/api";
 
 interface Semester {
   id: string;
   name: string;
   academic_year: string;
-  credits: number;
-  gpa: number;
+  credits?: number; // Might be derived later
+  gpa?: number;     // Might be derived later
 }
 
 export default function SemestersPage() {
-  const [semesters, setSemesters] = useState<Semester[]>([
-    { id: "1", name: "Semester 1", academic_year: "Year 1", credits: 15, gpa: 3.4 },
-    { id: "2", name: "Semester 2", academic_year: "Year 1", credits: 16, gpa: 3.55 },
-    { id: "3", name: "Semester 1", academic_year: "Year 2", credits: 14, gpa: 3.72 },
-  ]);
-
+  const [semesters, setSemesters] = useState<Semester[]>([]);
+  const [loading, setLoading] = useState(true);
+  
   const [showAddModal, setShowAddModal] = useState(false);
   const [newYear, setNewYear] = useState("Year 1");
   const [newSemester, setNewSemester] = useState("Semester 1");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleAddSemester = (e: React.FormEvent) => {
+  useEffect(() => {
+    const fetchSemesters = async () => {
+      const userId = localStorage.getItem("gradeflow_user_id");
+      if (!userId) return;
+      
+      const res = await getSemesters(userId);
+      if (res.status === "success" && res.data) {
+        // Our basic API returns records as objects mapping headers to values
+        setSemesters(res.data);
+      }
+      setLoading(false);
+    };
+    
+    fetchSemesters();
+  }, []);
+
+  const handleAddSemester = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newId = (semesters.length + 1).toString();
-    setSemesters([...semesters, {
+    setIsSubmitting(true);
+    
+    const userId = localStorage.getItem("gradeflow_user_id");
+    const newId = Date.now().toString();
+    
+    const semesterData = {
       id: newId,
+      user_id: userId,
       name: newSemester,
-      academic_year: newYear,
-      credits: 0,
-      gpa: 0
-    }]);
-    setShowAddModal(false);
+      academic_year: newYear
+    };
+    
+    const res = await addSemester(semesterData);
+    
+    if (res.status === "success") {
+      setSemesters([...semesters, {
+        id: newId,
+        name: newSemester,
+        academic_year: newYear,
+        credits: 0,
+        gpa: 0
+      }]);
+      setShowAddModal(false);
+    } else {
+      alert("Error adding semester: " + res.message);
+    }
+    
+    setIsSubmitting(false);
   };
 
   return (
     <main className="flex-1 p-6 relative overflow-x-hidden min-h-screen pb-24">
-      {/* Decorative background elements */}
       <div className="absolute top-[-5%] left-[-5%] w-[30%] h-[20%] rounded-full bg-primary-500/10 blur-3xl" />
       
       <header className="mb-6 relative z-10 flex justify-between items-end">
@@ -56,30 +89,40 @@ export default function SemestersPage() {
       </header>
 
       <section className="space-y-4 relative z-10">
-        {semesters.map((sem) => (
-          <Link href={`/semesters/${sem.id}`} key={sem.id} className="block">
-            <div className="glass-card p-5 rounded-3xl flex justify-between items-center transition-transform hover:-translate-y-1 hover:shadow-xl hover:shadow-primary-500/10">
-              <div>
-                <p className="text-xs font-semibold text-primary-600 dark:text-primary-400 uppercase tracking-wider mb-1">{sem.academic_year}</p>
-                <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">{sem.name}</h2>
-                <p className="text-sm text-slate-500 mt-1">{sem.credits} Credits</p>
-              </div>
-              <div className="flex flex-col items-end">
-                <div className="bg-gradient-to-br from-primary-50 to-primary-100 dark:from-slate-800 dark:to-slate-700 px-4 py-2 rounded-2xl border border-primary-100 dark:border-slate-700">
-                  <span className="font-bold text-lg text-primary-700 dark:text-primary-300">
-                    {sem.gpa > 0 ? sem.gpa.toFixed(2) : "N/A"}
+        {loading ? (
+          <div className="flex justify-center p-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+          </div>
+        ) : semesters.length === 0 ? (
+          <div className="glass-card p-8 rounded-3xl text-center border border-dashed border-slate-300 dark:border-slate-700">
+            <p className="text-slate-500">No semesters found. Add one to start tracking!</p>
+          </div>
+        ) : (
+          semesters.map((sem) => (
+            <Link href={`/semesters/${sem.id}`} key={sem.id} className="block">
+              <div className="glass-card p-5 rounded-3xl flex justify-between items-center transition-transform hover:-translate-y-1 hover:shadow-xl hover:shadow-primary-500/10">
+                <div>
+                  <p className="text-xs font-semibold text-primary-600 dark:text-primary-400 uppercase tracking-wider mb-1">{sem.academic_year}</p>
+                  <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">{sem.name}</h2>
+                  <p className="text-sm text-slate-500 mt-1">{sem.credits || 0} Credits</p>
+                </div>
+                <div className="flex flex-col items-end">
+                  <div className="bg-gradient-to-br from-primary-50 to-primary-100 dark:from-slate-800 dark:to-slate-700 px-4 py-2 rounded-2xl border border-primary-100 dark:border-slate-700">
+                    <span className="font-bold text-lg text-primary-700 dark:text-primary-300">
+                      {sem.gpa && sem.gpa > 0 ? Number(sem.gpa).toFixed(2) : "0.00"}
+                    </span>
+                  </div>
+                  <span className="text-xs text-slate-400 mt-2 font-medium flex items-center gap-1">
+                    View details
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
                   </span>
                 </div>
-                <span className="text-xs text-slate-400 mt-2 font-medium flex items-center gap-1">
-                  View details
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </span>
               </div>
-            </div>
-          </Link>
-        ))}
+            </Link>
+          ))
+        )}
       </section>
 
       {/* Add Semester Modal */}
@@ -124,9 +167,10 @@ export default function SemestersPage() {
 
               <button 
                 type="submit"
-                className="w-full py-3.5 mt-2 bg-gradient-to-r from-primary-600 to-primary-500 text-white rounded-xl font-semibold shadow-lg shadow-primary-500/30"
+                disabled={isSubmitting}
+                className="w-full py-3.5 mt-2 bg-gradient-to-r from-primary-600 to-primary-500 text-white rounded-xl font-semibold shadow-lg shadow-primary-500/30 disabled:opacity-70"
               >
-                Create Semester
+                {isSubmitting ? "Creating..." : "Create Semester"}
               </button>
             </form>
           </div>
