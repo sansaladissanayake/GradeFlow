@@ -47,3 +47,11 @@ export async function getSubjects(userId: string) {
 export async function addSubject(subjectData: any) {
   return fetchFromAPI('addSubject', subjectData);
 }
+
+export async function updateSubject(data: Record<string, any>) {
+  return fetchFromAPI('updateSubject', data);
+}
+
+export async function deleteSubject(id: string, userId: string) {
+  return fetchFromAPI('deleteSubject', { id, user_id: userId });
+}
