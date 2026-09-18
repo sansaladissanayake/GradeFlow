@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { getSubjects, addSubject, updateSubject, deleteSubject } from "@/lib/api";
+import { getSubjects, addSubject, updateSubject, deleteSubject, getSettings } from "@/lib/api";
 
 interface Subject {
   id: string;
@@ -14,12 +14,29 @@ interface Subject {
   gradePoint: number;
 }
 
+const DEFAULT_GRADING_SCALE = [
+  { grade: "A+", gpa: "4.00" },
+  { grade: "A", gpa: "4.00" },
+  { grade: "A-", gpa: "3.70" },
+  { grade: "B+", gpa: "3.30" },
+  { grade: "B", gpa: "3.00" },
+  { grade: "B-", gpa: "2.70" },
+  { grade: "C+", gpa: "2.30" },
+  { grade: "C", gpa: "2.00" },
+  { grade: "C-", gpa: "1.70" },
+  { grade: "D", gpa: "1.00" },
+  { grade: "F", gpa: "0.00" }
+];
+
 export default function SemesterDetailsPage() {
   const params = useParams();
   const id = params.id as string;
   
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  const [gradingScale, setGradingScale] = useState(DEFAULT_GRADING_SCALE);
+  const [gradePoints, setGradePoints] = useState<Record<string, number>>({});
 
   // Add Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -40,24 +57,39 @@ export default function SemesterDetailsPage() {
   
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
-  const gradePoints: Record<string, number> = {
-    "A+": 4.0, "A": 4.0, "A-": 3.7, "B+": 3.3, "B": 3.0, "B-": 2.7, "C+": 2.3, "C": 2.0, "C-": 1.7, "D": 1.0, "F": 0.0
-  };
-
   useEffect(() => {
-    const fetchSubjects = async () => {
+    const fetchData = async () => {
       const userId = localStorage.getItem("gradeflow_user_id");
       if (!userId) return;
       
-      const res = await getSubjects(userId);
-      if (res.status === "success" && res.data) {
-        const semSubjects = res.data.filter((s: any) => String(s.semester_id) === String(id));
-        setSubjects(semSubjects);
+      try {
+        // Fetch Settings for custom grading scale
+        const settingsRes = await getSettings(userId);
+        let currentScale = DEFAULT_GRADING_SCALE;
+        if (settingsRes.status === "success" && settingsRes.data?.grading_scale) {
+          currentScale = JSON.parse(settingsRes.data.grading_scale);
+          setGradingScale(currentScale);
+        }
+        
+        const gPoints: Record<string, number> = {};
+        currentScale.forEach(item => {
+          gPoints[item.grade] = parseFloat(item.gpa);
+        });
+        setGradePoints(gPoints);
+        
+        // Fetch Subjects
+        const res = await getSubjects(userId);
+        if (res.status === "success" && res.data) {
+          const semSubjects = res.data.filter((s: any) => String(s.semester_id) === String(id));
+          setSubjects(semSubjects);
+        }
+      } catch (e) {
+        console.error(e);
       }
       setLoading(false);
     };
     
-    fetchSubjects();
+    fetchData();
   }, [id]);
 
   const gpa = subjects.length 
@@ -263,7 +295,7 @@ export default function SemesterDetailsPage() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Grade</label>
                 <select value={newGrade} onChange={(e) => setNewGrade(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-primary-500 outline-none font-bold text-primary-600">
-                  {["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F"].map(grade => <option key={grade} value={grade}>{grade}</option>)}
+                  {gradingScale.map(item => <option key={item.grade} value={item.grade}>{item.grade}</option>)}
                 </select>
               </div>
 
@@ -310,7 +342,7 @@ export default function SemesterDetailsPage() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Grade</label>
                 <select value={editGrade} onChange={(e) => setEditGrade(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-primary-500 outline-none font-bold text-primary-600">
-                  {["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F"].map(grade => <option key={grade} value={grade}>{grade}</option>)}
+                  {gradingScale.map(item => <option key={item.grade} value={item.grade}>{item.grade}</option>)}
                 </select>
               </div>
 

@@ -55,3 +55,10 @@ export async function updateSubject(data: Record<string, any>) {
 export async function deleteSubject(id: string, userId: string) {
   return fetchFromAPI('deleteSubject', { id, user_id: userId });
 }
+export async function getSettings(userId: string) {
+  return fetchFromAPI('getSettings', { user_id: userId });
+}
+
+export async function saveSettings(userId: string, gradingScale: string, classBoundaries: string) {
+  return fetchFromAPI('saveSettings', { user_id: userId, grading_scale: gradingScale, class_boundaries: classBoundaries });
+}

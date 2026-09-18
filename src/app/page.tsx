@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getSemesters, getSubjects } from "@/lib/api";
+import { getSemesters, getSubjects, getSettings } from "@/lib/api";
+
+const DEFAULT_CLASS_BOUNDARIES = [
+  { name: "First Class", min: "3.70", max: "4.00" },
+  { name: "Second Upper", min: "3.30", max: "3.69" },
+  { name: "Second Lower", min: "3.00", max: "3.29" },
+  { name: "Pass", min: "2.00", max: "2.99" },
+];
 
 export default function Dashboard() {
   const [userName, setUserName] = useState("Student");
@@ -10,6 +17,9 @@ export default function Dashboard() {
   const [overallGpa, setOverallGpa] = useState("0.00");
   const [totalCredits, setTotalCredits] = useState(0);
   const [currentClass, setCurrentClass] = useState("Unclassified");
+  const [targetClass, setTargetClass] = useState("First Class");
+  const [targetGpa, setTargetGpa] = useState(3.70);
+  
   const [recentSemesters, setRecentSemesters] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -25,9 +35,10 @@ export default function Dashboard() {
       }
       
       try {
-        const [semRes, subRes] = await Promise.all([
+        const [semRes, subRes, settingsRes] = await Promise.all([
           getSemesters(userId),
-          getSubjects(userId)
+          getSubjects(userId),
+          getSettings(userId)
         ]);
         
         let semesters = [];
@@ -35,6 +46,11 @@ export default function Dashboard() {
         
         if (semRes.status === "success" && semRes.data) semesters = semRes.data;
         if (subRes.status === "success" && subRes.data) subjects = subRes.data;
+        
+        let boundaries = DEFAULT_CLASS_BOUNDARIES;
+        if (settingsRes.status === "success" && settingsRes.data?.class_boundaries) {
+          boundaries = JSON.parse(settingsRes.data.class_boundaries);
+        }
         
         // Calculate overall stats
         let tCredits = 0;
@@ -49,18 +65,40 @@ export default function Dashboard() {
         setTotalCredits(tCredits);
         setOverallGpa(cgpa);
         
-        // Determine Academic Class (Basic Logic)
         const cgpaNum = parseFloat(cgpa);
-        if (tCredits === 0) setCurrentClass("Unclassified");
-        else if (cgpaNum >= 3.7) setCurrentClass("First Class");
-        else if (cgpaNum >= 3.3) setCurrentClass("Second Upper");
-        else if (cgpaNum >= 3.0) setCurrentClass("Second Lower");
-        else if (cgpaNum >= 2.0) setCurrentClass("Pass");
-        else setCurrentClass("Fail");
         
-        // Calculate per-semester stats for "Recent Semesters"
+        // Sort boundaries from highest to lowest
+        const sortedBoundaries = [...boundaries].sort((a, b) => parseFloat(b.max) - parseFloat(a.max));
+        
+        // Determine Current Class
+        if (tCredits === 0) {
+          setCurrentClass("Unclassified");
+        } else {
+          let foundClass = "Fail";
+          for (const b of sortedBoundaries) {
+            if (cgpaNum >= parseFloat(b.min)) {
+              foundClass = b.name;
+              break;
+            }
+          }
+          setCurrentClass(foundClass);
+        }
+        
+        // Determine Target Class (Next highest boundary)
+        let nextTarget = sortedBoundaries[0]; // Highest class default
+        if (sortedBoundaries.length > 0) {
+          for (let i = sortedBoundaries.length - 1; i >= 0; i--) {
+             if (cgpaNum < parseFloat(sortedBoundaries[i].min)) {
+                nextTarget = sortedBoundaries[i];
+                break;
+             }
+          }
+          setTargetClass(nextTarget.name);
+          setTargetGpa(parseFloat(nextTarget.min));
+        }
+
+        // Calculate per-semester stats
         const semStats = semesters.map((sem: any) => {
-          // Fix: Convert both to strings because Google Sheets often coerces large numbers
           const semSubs = subjects.filter((s: any) => String(s.semester_id) === String(sem.id));
           let sCredits = 0;
           let sPoints = 0;
@@ -76,7 +114,7 @@ export default function Dashboard() {
           };
         });
         
-        // Sort newest first (using ID which is a timestamp) and take top 2
+        // Sort newest first
         semStats.sort((a: any, b: any) => String(b.id).localeCompare(String(a.id)));
         setRecentSemesters(semStats.slice(0, 2));
         
@@ -138,23 +176,23 @@ export default function Dashboard() {
         <div className="glass-card rounded-3xl p-5 border-l-4 border-l-accent-500">
           <div className="flex justify-between items-center mb-3">
             <h3 className="font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-              <span>🎯</span> Target: First Class
+              <span>🎯</span> Target: {targetClass}
             </h3>
-            <span className="text-sm font-semibold text-accent-500">3.70</span>
+            <span className="text-sm font-semibold text-accent-500">{targetGpa.toFixed(2)}</span>
           </div>
           
           <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-3 mb-2 overflow-hidden shadow-inner">
             <div 
               className="bg-gradient-to-r from-primary-500 to-accent-500 h-3 rounded-full" 
-              style={{ width: `${Math.min((parseFloat(overallGpa) / 3.7) * 100, 100)}%` }}
+              style={{ width: `${Math.min((parseFloat(overallGpa) / targetGpa) * 100, 100)}%` }}
             ></div>
           </div>
           
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            {parseFloat(overallGpa) >= 3.7 ? (
-              <span className="text-primary-600">You've reached your goal! 🎉</span>
+            {parseFloat(overallGpa) >= targetGpa ? (
+              <span className="text-primary-600">You've reached your highest goal! 🎉</span>
             ) : (
-              <span>You need a <strong className="text-foreground">{(3.70 - parseFloat(overallGpa)).toFixed(2)}</strong> CGPA increase to reach your goal.</span>
+              <span>You need a <strong className="text-foreground">{(targetGpa - parseFloat(overallGpa)).toFixed(2)}</strong> CGPA increase to reach your goal.</span>
             )}
           </p>
         </div>
