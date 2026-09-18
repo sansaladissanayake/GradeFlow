@@ -3,7 +3,6 @@
 const APPS_SCRIPT_URL = process.env.NEXT_PUBLIC_APPS_SCRIPT_URL;
 
 export async function fetchFromAPI(action: string, data: Record<string, any> = {}) {
-  // If no URL is provided, return mock data or throw error based on your preference
   if (!APPS_SCRIPT_URL) {
     console.warn("NEXT_PUBLIC_APPS_SCRIPT_URL is not set. Using mock mode.");
     return { status: "error", message: "API not connected" };
@@ -12,12 +11,14 @@ export async function fetchFromAPI(action: string, data: Record<string, any> = {
   try {
     const payload = { action, data };
     
-    const response = await fetch(APPS_SCRIPT_URL, {
+    // Fix: Always append action to URL so it's not lost if Google redirects the POST request
+    const url = new URL(APPS_SCRIPT_URL);
+    url.searchParams.append("action", action);
+    
+    const response = await fetch(url.toString(), {
       method: "POST",
       headers: {
         "Content-Type": "text/plain;charset=utf-8", 
-        // Note: Google Apps script requires text/plain for CORS sometimes, or no-cors mode.
-        // We parse it as JSON on the Apps Script side.
       },
       body: JSON.stringify(payload),
     });
