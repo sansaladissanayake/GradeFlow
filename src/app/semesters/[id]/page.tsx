@@ -74,18 +74,19 @@ export default function SemesterDetailsPage() {
       gradePoint: gPoint
     };
     
-    const res = await addSubject(subjectData);
-    
-    if (res.status === "success") {
-      setSubjects([...subjects, subjectData]);
-      setShowAddModal(false);
-      setNewSubCode("");
-      setNewSubName("");
-    } else {
-      alert("Error adding subject: " + res.message);
-    }
-    
+    // OPTIMISTIC UPDATE: Update UI instantly
+    setSubjects([...subjects, subjectData]);
+    setShowAddModal(false);
+    setNewSubCode("");
+    setNewSubName("");
     setIsSubmitting(false);
+    
+    // Background Sync
+    addSubject(subjectData).then(res => {
+      if (res.status !== "success") {
+        console.error("Error adding subject: ", res.message);
+      }
+    }).catch(err => console.error("Sync error:", err));
   };
 
   return (

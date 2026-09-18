@@ -51,22 +51,23 @@ export default function SemestersPage() {
       academic_year: newYear
     };
     
-    const res = await addSemester(semesterData);
-    
-    if (res.status === "success") {
-      setSemesters([...semesters, {
-        id: newId,
-        name: newSemester,
-        academic_year: newYear,
-        credits: 0,
-        gpa: 0
-      }]);
-      setShowAddModal(false);
-    } else {
-      alert("Error adding semester: " + res.message);
-    }
-    
+    // OPTIMISTIC UPDATE: Update UI instantly so user doesn't wait for Google Sheets
+    setSemesters([...semesters, {
+      id: newId,
+      name: newSemester,
+      academic_year: newYear,
+      credits: 0,
+      gpa: 0
+    }]);
+    setShowAddModal(false);
     setIsSubmitting(false);
+    
+    // Background Sync
+    addSemester(semesterData).then(res => {
+      if (res.status !== "success") {
+        console.error("Error adding semester: ", res.message);
+      }
+    }).catch(err => console.error("Sync error:", err));
   };
 
   return (
