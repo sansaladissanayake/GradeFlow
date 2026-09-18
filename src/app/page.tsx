@@ -57,8 +57,10 @@ export default function Dashboard() {
         let tPoints = 0;
         
         subjects.forEach((s: any) => {
-          tCredits += Number(s.credits);
-          tPoints += Number(s.credits) * Number(s.gradePoint);
+          if (s.grade !== "Pending") {
+            tCredits += Number(s.credits);
+            tPoints += Number(s.credits) * Number(s.gradePoint);
+          }
         });
         
         const cgpa = tCredits > 0 ? (tPoints / tCredits).toFixed(2) : "0.00";
@@ -103,8 +105,10 @@ export default function Dashboard() {
           let sCredits = 0;
           let sPoints = 0;
           semSubs.forEach((s: any) => {
-            sCredits += Number(s.credits);
-            sPoints += Number(s.credits) * Number(s.gradePoint);
+            if (s.grade !== "Pending") {
+              sCredits += Number(s.credits);
+              sPoints += Number(s.credits) * Number(s.gradePoint);
+            }
           });
           return {
             id: sem.id,

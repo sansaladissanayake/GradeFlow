@@ -43,7 +43,7 @@ export default function SemesterDetailsPage() {
   const [newSubCode, setNewSubCode] = useState("");
   const [newSubName, setNewSubName] = useState("");
   const [newCredits, setNewCredits] = useState("3");
-  const [newGrade, setNewGrade] = useState("A");
+  const [newGrade, setNewGrade] = useState("Pending");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Edit Modal State
@@ -92,9 +92,10 @@ export default function SemesterDetailsPage() {
     fetchData();
   }, [id]);
 
-  const gpa = subjects.length 
-    ? (subjects.reduce((acc, sub) => acc + sub.credits * sub.gradePoint, 0) / 
-       subjects.reduce((acc, sub) => acc + sub.credits, 0)).toFixed(2)
+  const gradedSubjects = subjects.filter(sub => sub.grade !== "Pending");
+  const gpa = gradedSubjects.length 
+    ? (gradedSubjects.reduce((acc, sub) => acc + sub.credits * sub.gradePoint, 0) / 
+       gradedSubjects.reduce((acc, sub) => acc + sub.credits, 0)).toFixed(2)
     : "0.00";
 
   const handleAddSubject = async (e: React.FormEvent) => {
@@ -251,8 +252,8 @@ export default function SemesterDetailsPage() {
                   </div>
                 </div>
                 
-                <div className="bg-slate-100 dark:bg-slate-800 w-12 h-12 rounded-xl flex items-center justify-center font-bold text-xl text-primary-600 shadow-inner">
-                  {sub.grade}
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-xl shadow-inner ${sub.grade === "Pending" ? "bg-slate-100 dark:bg-slate-800/50 text-slate-400" : "bg-slate-100 dark:bg-slate-800 text-primary-600"}`}>
+                  {sub.grade === "Pending" ? "—" : sub.grade}
                 </div>
               </div>
             ))}
@@ -295,6 +296,7 @@ export default function SemesterDetailsPage() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Grade</label>
                 <select value={newGrade} onChange={(e) => setNewGrade(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-primary-500 outline-none font-bold text-primary-600">
+                  <option value="Pending">Pending (Not Graded)</option>
                   {gradingScale.map(item => <option key={item.grade} value={item.grade}>{item.grade}</option>)}
                 </select>
               </div>
@@ -342,6 +344,7 @@ export default function SemesterDetailsPage() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Grade</label>
                 <select value={editGrade} onChange={(e) => setEditGrade(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-primary-500 outline-none font-bold text-primary-600">
+                  <option value="Pending">Pending (Not Graded)</option>
                   {gradingScale.map(item => <option key={item.grade} value={item.grade}>{item.grade}</option>)}
                 </select>
               </div>
