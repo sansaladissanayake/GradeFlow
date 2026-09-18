@@ -2,14 +2,14 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { getSemesters, addSemester } from "@/lib/api";
+import { getSemesters, getSubjects, addSemester } from "@/lib/api";
 
 interface Semester {
   id: string;
   name: string;
   academic_year: string;
-  credits?: number; // Might be derived later
-  gpa?: number;     // Might be derived later
+  credits?: number;
+  gpa?: number;
 }
 
 export default function SemestersPage() {
@@ -22,19 +22,47 @@ export default function SemestersPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    const fetchSemesters = async () => {
+    const fetchData = async () => {
       const userId = localStorage.getItem("gradeflow_user_id");
       if (!userId) return;
       
-      const res = await getSemesters(userId);
-      if (res.status === "success" && res.data) {
-        // Our basic API returns records as objects mapping headers to values
-        setSemesters(res.data);
+      try {
+        const [semRes, subRes] = await Promise.all([
+          getSemesters(userId),
+          getSubjects(userId)
+        ]);
+        
+        let sems: Semester[] = [];
+        let subs: any[] = [];
+        
+        if (semRes.status === "success" && semRes.data) sems = semRes.data;
+        if (subRes.status === "success" && subRes.data) subs = subRes.data;
+        
+        // Calculate credits and gpa per semester
+        const semStats = sems.map(sem => {
+          const semSubs = subs.filter((s: any) => String(s.semester_id) === String(sem.id));
+          let sCredits = 0;
+          let sPoints = 0;
+          semSubs.forEach((s: any) => {
+            sCredits += Number(s.credits);
+            sPoints += Number(s.credits) * Number(s.gradePoint);
+          });
+          
+          return {
+            ...sem,
+            credits: sCredits,
+            gpa: sCredits > 0 ? (sPoints / sCredits) : 0
+          };
+        });
+        
+        setSemesters(semStats);
+      } catch (e) {
+        console.error(e);
       }
       setLoading(false);
     };
     
-    fetchSemesters();
+    fetchData();
   }, []);
 
   const handleAddSemester = async (e: React.FormEvent) => {
@@ -51,7 +79,7 @@ export default function SemestersPage() {
       academic_year: newYear
     };
     
-    // OPTIMISTIC UPDATE: Update UI instantly so user doesn't wait for Google Sheets
+    // OPTIMISTIC UPDATE
     setSemesters([...semesters, {
       id: newId,
       name: newSemester,
