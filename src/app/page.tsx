@@ -60,7 +60,8 @@ export default function Dashboard() {
         
         // Calculate per-semester stats for "Recent Semesters"
         const semStats = semesters.map((sem: any) => {
-          const semSubs = subjects.filter((s: any) => s.semester_id === sem.id);
+          // Fix: Convert both to strings because Google Sheets often coerces large numbers
+          const semSubs = subjects.filter((s: any) => String(s.semester_id) === String(sem.id));
           let sCredits = 0;
           let sPoints = 0;
           semSubs.forEach((s: any) => {
@@ -76,7 +77,7 @@ export default function Dashboard() {
         });
         
         // Sort newest first (using ID which is a timestamp) and take top 2
-        semStats.sort((a: any, b: any) => b.id.localeCompare(a.id));
+        semStats.sort((a: any, b: any) => String(b.id).localeCompare(String(a.id)));
         setRecentSemesters(semStats.slice(0, 2));
         
       } catch (err) {

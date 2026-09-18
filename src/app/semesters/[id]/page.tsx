@@ -35,8 +35,8 @@ export default function SemesterDetailsPage() {
       
       const res = await getSubjects(userId);
       if (res.status === "success" && res.data) {
-        // Filter by semester_id
-        const semSubjects = res.data.filter((s: any) => s.semester_id === id);
+        // Filter by semester_id (convert to string because Google Sheets might coerce ID to Number)
+        const semSubjects = res.data.filter((s: any) => String(s.semester_id) === String(id));
         setSubjects(semSubjects);
       }
       setLoading(false);
