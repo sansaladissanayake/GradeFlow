@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { getSemesters, getSubjects, addSemester } from "@/lib/api";
+import useSWR from "swr";
+import { addSemester, swrFetcher } from "@/lib/api";
 
 interface Semester {
   id: string;
@@ -13,8 +14,7 @@ interface Semester {
 }
 
 export default function SemestersPage() {
-  const [semesters, setSemesters] = useState<Semester[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
   
   const [showAddModal, setShowAddModal] = useState(false);
   const [newYear, setNewYear] = useState("Year 1");
@@ -22,56 +22,45 @@ export default function SemestersPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    const fetchData = async () => {
-      const userId = localStorage.getItem("gradeflow_user_id");
-      if (!userId) return;
-      
-      try {
-        const [semRes, subRes] = await Promise.all([
-          getSemesters(userId),
-          getSubjects(userId)
-        ]);
-        
-        let sems: Semester[] = [];
-        let subs: any[] = [];
-        
-        if (semRes.status === "success" && semRes.data) sems = semRes.data;
-        if (subRes.status === "success" && subRes.data) subs = subRes.data;
-        
-        // Calculate credits and gpa per semester
-        const semStats = sems.map(sem => {
-          const semSubs = subs.filter((s: any) => String(s.semester_id) === String(sem.id));
-          let sCredits = 0;
-          let sPoints = 0;
-          semSubs.forEach((s: any) => {
-            if (s.grade !== "Pending") {
-              sCredits += Number(s.credits);
-              sPoints += Number(s.credits) * Number(s.gradePoint);
-            }
-          });
-          
-          return {
-            ...sem,
-            credits: sCredits,
-            gpa: sCredits > 0 ? (sPoints / sCredits) : 0
-          };
-        });
-        
-        setSemesters(semStats);
-      } catch (e) {
-        console.error(e);
-      }
-      setLoading(false);
-    };
-    
-    fetchData();
+    setUserId(localStorage.getItem("gradeflow_user_id"));
   }, []);
+
+  const { data: rawSemesters = [], isLoading: semLoading, mutate: mutateSemesters } = useSWR(
+    userId ? ["getSemesters", userId] : null, 
+    swrFetcher
+  );
+  
+  const { data: rawSubjects = [], isLoading: subLoading } = useSWR(
+    userId ? ["getSubjects", userId] : null, 
+    swrFetcher
+  );
+
+  const loading = !userId || semLoading || subLoading;
+
+  // Process data if loaded
+  const semesters = rawSemesters.map((sem: any) => {
+    const semSubs = rawSubjects.filter((s: any) => String(s.semester_id) === String(sem.id));
+    let sCredits = 0;
+    let sPoints = 0;
+    semSubs.forEach((s: any) => {
+      if (s.grade !== "Pending") {
+        sCredits += Number(s.credits);
+        sPoints += Number(s.credits) * Number(s.gradePoint);
+      }
+    });
+    
+    return {
+      ...sem,
+      credits: sCredits,
+      gpa: sCredits > 0 ? (sPoints / sCredits) : 0
+    };
+  });
 
   const handleAddSemester = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!userId) return;
     setIsSubmitting(true);
     
-    const userId = localStorage.getItem("gradeflow_user_id");
     const newId = Date.now().toString();
     
     const semesterData = {
@@ -81,14 +70,8 @@ export default function SemestersPage() {
       academic_year: newYear
     };
     
-    // OPTIMISTIC UPDATE
-    setSemesters([...semesters, {
-      id: newId,
-      name: newSemester,
-      academic_year: newYear,
-      credits: 0,
-      gpa: 0
-    }]);
+    // OPTIMISTIC UPDATE: Update SWR cache instantly
+    mutateSemesters([...rawSemesters, semesterData], false);
     setShowAddModal(false);
     setIsSubmitting(false);
     
@@ -97,7 +80,11 @@ export default function SemestersPage() {
       if (res.status !== "success") {
         console.error("Error adding semester: ", res.message);
       }
-    }).catch(err => console.error("Sync error:", err));
+      mutateSemesters(); // Revalidate from server
+    }).catch(err => {
+      console.error("Sync error:", err);
+      mutateSemesters(); // Revalidate from server
+    });
   };
 
   return (
@@ -129,7 +116,7 @@ export default function SemestersPage() {
             <p className="text-slate-500">No semesters found. Add one to start tracking!</p>
           </div>
         ) : (
-          semesters.map((sem) => (
+          semesters.map((sem: any) => (
             <Link href={`/semesters/${sem.id}`} key={sem.id} className="block">
               <div className="glass-card p-5 rounded-3xl flex justify-between items-center transition-transform hover:-translate-y-1 hover:shadow-xl hover:shadow-primary-500/10">
                 <div>

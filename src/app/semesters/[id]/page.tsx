@@ -3,10 +3,12 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { getSubjects, addSubject, updateSubject, deleteSubject, getSettings } from "@/lib/api";
+import useSWR from "swr";
+import { addSubject, updateSubject, deleteSubject, swrFetcher } from "@/lib/api";
 
 interface Subject {
   id: string;
+  semester_id: string;
   code: string;
   name: string;
   credits: number;
@@ -32,11 +34,7 @@ export default function SemesterDetailsPage() {
   const params = useParams();
   const id = params.id as string;
   
-  const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [loading, setLoading] = useState(true);
-  
-  const [gradingScale, setGradingScale] = useState(DEFAULT_GRADING_SCALE);
-  const [gradePoints, setGradePoints] = useState<Record<string, number>>({});
+  const [userId, setUserId] = useState<string | null>(null);
 
   // Add Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -58,51 +56,45 @@ export default function SemesterDetailsPage() {
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchData = async () => {
-      const userId = localStorage.getItem("gradeflow_user_id");
-      if (!userId) return;
-      
-      try {
-        // Fetch Settings for custom grading scale
-        const settingsRes = await getSettings(userId);
-        let currentScale = DEFAULT_GRADING_SCALE;
-        if (settingsRes.status === "success" && settingsRes.data?.grading_scale) {
-          currentScale = JSON.parse(settingsRes.data.grading_scale);
-          setGradingScale(currentScale);
-        }
-        
-        const gPoints: Record<string, number> = {};
-        currentScale.forEach(item => {
-          gPoints[item.grade] = parseFloat(item.gpa);
-        });
-        setGradePoints(gPoints);
-        
-        // Fetch Subjects
-        const res = await getSubjects(userId);
-        if (res.status === "success" && res.data) {
-          const semSubjects = res.data.filter((s: any) => String(s.semester_id) === String(id));
-          setSubjects(semSubjects);
-        }
-      } catch (e) {
-        console.error(e);
-      }
-      setLoading(false);
-    };
-    
-    fetchData();
-  }, [id]);
+    setUserId(localStorage.getItem("gradeflow_user_id"));
+  }, []);
 
-  const gradedSubjects = subjects.filter(sub => sub.grade !== "Pending");
+  const { data: rawSubjects = [], isLoading: subLoading, mutate: mutateSubjects } = useSWR(
+    userId ? ["getSubjects", userId] : null,
+    swrFetcher
+  );
+  
+  const { data: settings, isLoading: setLoading } = useSWR(
+    userId ? ["getSettings", userId] : null,
+    swrFetcher
+  );
+
+  const loading = !userId || subLoading || setLoading;
+
+  // Process data
+  let gradingScale = DEFAULT_GRADING_SCALE;
+  if (settings?.grading_scale) {
+    gradingScale = JSON.parse(settings.grading_scale);
+  }
+  
+  const gradePoints: Record<string, number> = {};
+  gradingScale.forEach(item => {
+    gradePoints[item.grade] = parseFloat(item.gpa);
+  });
+
+  const subjects = rawSubjects.filter((s: any) => String(s.semester_id) === String(id));
+
+  const gradedSubjects = subjects.filter((sub: any) => sub.grade !== "Pending");
   const gpa = gradedSubjects.length 
-    ? (gradedSubjects.reduce((acc, sub) => acc + sub.credits * sub.gradePoint, 0) / 
-       gradedSubjects.reduce((acc, sub) => acc + sub.credits, 0)).toFixed(2)
+    ? (gradedSubjects.reduce((acc: number, sub: any) => acc + sub.credits * sub.gradePoint, 0) / 
+       gradedSubjects.reduce((acc: number, sub: any) => acc + sub.credits, 0)).toFixed(2)
     : "0.00";
 
   const handleAddSubject = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!userId) return;
     setIsSubmitting(true);
     
-    const userId = localStorage.getItem("gradeflow_user_id") || "";
     const newId = Date.now().toString();
     const gPoint = gradePoints[newGrade] || 0;
     
@@ -118,14 +110,19 @@ export default function SemesterDetailsPage() {
     };
     
     // OPTIMISTIC UPDATE
-    setSubjects([...subjects, subjectData]);
+    mutateSubjects([...rawSubjects, subjectData], false);
     setShowAddModal(false);
     setNewSubCode("");
     setNewSubName("");
     setIsSubmitting(false);
     
     // Background Sync
-    addSubject(subjectData).catch(err => console.error("Sync error:", err));
+    addSubject(subjectData)
+      .then(() => mutateSubjects())
+      .catch(err => {
+        console.error("Sync error:", err);
+        mutateSubjects();
+      });
   };
 
   const openEditModal = (sub: Subject) => {
@@ -139,10 +136,9 @@ export default function SemesterDetailsPage() {
 
   const handleEditSubject = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editSubjectId) return;
+    if (!editSubjectId || !userId) return;
     setIsEditing(true);
     
-    const userId = localStorage.getItem("gradeflow_user_id") || "";
     const gPoint = gradePoints[editGrade] || 0;
     
     const subjectData = {
@@ -157,27 +153,37 @@ export default function SemesterDetailsPage() {
     };
     
     // OPTIMISTIC UPDATE
-    setSubjects(subjects.map(s => s.id === editSubjectId ? subjectData : s));
+    mutateSubjects(rawSubjects.map((s: any) => s.id === editSubjectId ? subjectData : s), false);
     setShowEditModal(false);
     setIsEditing(false);
     setEditSubjectId(null);
     
     // Background Sync
-    updateSubject(subjectData).catch(err => console.error("Update error:", err));
+    updateSubject(subjectData)
+      .then(() => mutateSubjects())
+      .catch(err => {
+        console.error("Update error:", err);
+        mutateSubjects();
+      });
   };
 
   const handleDeleteSubject = async (subjectId: string) => {
     if (!confirm("Are you sure you want to delete this subject?")) return;
+    if (!userId) return;
     
     setIsDeleting(subjectId);
-    const userId = localStorage.getItem("gradeflow_user_id") || "";
     
     // OPTIMISTIC UPDATE
-    setSubjects(subjects.filter(s => s.id !== subjectId));
+    mutateSubjects(rawSubjects.filter((s: any) => s.id !== subjectId), false);
     setIsDeleting(null);
     
     // Background Sync
-    deleteSubject(subjectId, userId).catch(err => console.error("Delete error:", err));
+    deleteSubject(subjectId, userId)
+      .then(() => mutateSubjects())
+      .catch(err => {
+        console.error("Delete error:", err);
+        mutateSubjects();
+      });
   };
 
   return (
@@ -232,7 +238,7 @@ export default function SemesterDetailsPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {subjects.map((sub) => (
+            {subjects.map((sub: any) => (
               <div key={sub.id} className="glass-panel p-4 rounded-2xl flex justify-between items-center shadow-sm relative group">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
