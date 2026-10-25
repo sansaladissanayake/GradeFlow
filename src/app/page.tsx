@@ -156,6 +156,19 @@ export default function Dashboard() {
         </div>
       </section>
 
+      <section className="relative z-10 grid grid-cols-2 gap-3 mb-6">
+        <div className="glass-card rounded-2xl p-4">
+          <p className="text-xs text-slate-500 dark:text-slate-400">Quality points</p>
+          <p className="text-2xl font-bold text-foreground mt-1">{tPoints.toFixed(1)}</p>
+          <p className="text-xs text-slate-500 mt-1">Across graded courses</p>
+        </div>
+        <div className="glass-card rounded-2xl p-4">
+          <p className="text-xs text-slate-500 dark:text-slate-400">Completed credits</p>
+          <p className="text-2xl font-bold text-foreground mt-1">{tCredits}</p>
+          <p className="text-xs text-slate-500 mt-1">{subjects.filter((s: any) => s.grade !== "Pending").length} graded courses</p>
+        </div>
+      </section>
+
       {/* Next Class Goal Card */}
       <section className="mb-6 relative z-10">
         <div className="glass-card rounded-3xl p-5 border-l-4 border-l-accent-500">

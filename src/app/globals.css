@@ -1,9 +1,6 @@
 @import "tailwindcss";
 
-:root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
-}
+:root { --background: #f4f6fb; --foreground: #111827; }
 
 @theme inline {
   --color-background: var(--background);
@@ -26,6 +23,9 @@ html.dark {
   --foreground: #f8fafc;
 }
 
+html { color-scheme: light; }
+html.dark { color-scheme: dark; }
+
 @layer base {
   body {
     background: var(--background);
@@ -35,12 +35,16 @@ html.dark {
 
 @layer utilities {
   .glass-card {
-    @apply bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border border-white/20 dark:border-slate-800/50 shadow-xl shadow-indigo-500/5 dark:shadow-indigo-500/10;
+    @apply bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-lg shadow-slate-900/5 dark:shadow-black/15;
   }
   .glass-panel {
-    @apply bg-white/40 dark:bg-slate-800/40 backdrop-blur-lg border border-white/40 dark:border-slate-700/50;
+    @apply bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/70;
   }
   .text-gradient {
     @apply bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-accent-500 dark:from-primary-400 dark:to-pink-400;
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
