@@ -16,12 +16,20 @@ export default function Dashboard() {
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState("Student");
   const [gpaMode, setGpaMode] = useState<"normal" | "weighted">("normal");
+  const [remainingCredits, setRemainingCredits] = useState([0, 0, 0, 0]);
 
   useEffect(() => {
     setUserId(localStorage.getItem("gradeflow_user_id"));
     const name = localStorage.getItem("gradeflow_user_name");
     if (name) setUserName(name);
     setGpaMode(localStorage.getItem("gradeflow_gpa_mode") === "weighted" ? "weighted" : "normal");
+    try {
+      const saved = localStorage.getItem("gradeflow_remaining_credits");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === 4) setRemainingCredits(parsed.map((value) => Math.max(0, Number(value) || 0)));
+      }
+    } catch { /* Ignore invalid saved estimates and use empty year balances. */ }
   }, []);
 
   const { data: semesters = [], isLoading: semLoading } = useSWR(userId ? ["getSemesters", userId] : null, swrFetcher);
@@ -59,6 +67,7 @@ export default function Dashboard() {
   const yearWeights = [0, 0.2, 0.2, 0.3, 0.3];
   const yearlyGpa = (year: number) => (yearCredits.get(year) ?? 0) > 0 ? (yearPoints.get(year) ?? 0) / (yearCredits.get(year) ?? 1) : 0;
   const weightedGpa = [1, 2, 3, 4].reduce((sum, year) => sum + yearWeights[year] * yearlyGpa(year), 0);
+  const plannedCredits = remainingCredits.reduce((sum, credits) => sum + credits, 0);
   const overallGpa = (gpaMode === "weighted" ? weightedGpa : tCredits > 0 ? tPoints / tCredits : 0).toFixed(2);
   const cgpaNum = parseFloat(overallGpa);
 
@@ -107,6 +116,27 @@ export default function Dashboard() {
 
   const recentSemesters = semStats.slice(0, 2);
 
+  const firstClassBoundary = boundaries.find((boundary: any) => /first/i.test(boundary.name)) ?? boundaries[0];
+  const firstClassTarget = firstClassBoundary ? Number(firstClassBoundary.min) : 3.7;
+  const projectedCurrent = [1, 2, 3, 4].reduce((sum, year) => {
+    const earned = yearCredits.get(year) ?? 0;
+    const planned = remainingCredits[year - 1];
+    const yearTotal = earned + planned;
+    return sum + (yearTotal > 0 ? yearWeights[year] * ((yearPoints.get(year) ?? 0) / yearTotal) : 0);
+  }, 0);
+  const futureGpaFactor = [1, 2, 3, 4].reduce((sum, year) => {
+    const earned = yearCredits.get(year) ?? 0;
+    const planned = remainingCredits[year - 1];
+    return sum + (earned + planned > 0 ? yearWeights[year] * planned / (earned + planned) : 0);
+  }, 0);
+  const neededFutureGpa = futureGpaFactor > 0 ? (firstClassTarget - projectedCurrent) / futureGpaFactor : null;
+  const updateRemainingCredits = (index: number, value: string) => {
+    const updated = [...remainingCredits];
+    updated[index] = Math.max(0, Number(value) || 0);
+    setRemainingCredits(updated);
+    localStorage.setItem("gradeflow_remaining_credits", JSON.stringify(updated));
+  };
+
   return (
     <main className="flex-1 p-6 relative overflow-x-hidden pb-24">
       {/* Decorative background elements */}
@@ -153,6 +183,37 @@ export default function Dashboard() {
               <span className="text-accent-500 font-semibold">{currentClass}</span>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="mb-6 relative z-10">
+        <div className="glass-card rounded-3xl p-5">
+          <div className="flex justify-between items-start gap-4 mb-4">
+            <div>
+              <h3 className="font-bold text-foreground">First Class GPA Plan</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Estimate remaining credits by academic year</p>
+            </div>
+            <span className="shrink-0 rounded-xl bg-primary-50 dark:bg-slate-800 px-3 py-2 text-sm font-bold text-primary-700 dark:text-primary-300">Target {firstClassTarget.toFixed(2)}</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {remainingCredits.map((credits, index) => (
+              <label key={index} className="block rounded-xl bg-slate-50 dark:bg-slate-800/70 p-3">
+                <span className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Year {index + 1}</span>
+                <input type="number" min="0" step="1" value={credits || ""} onChange={(event) => updateRemainingCredits(index, event.target.value)} placeholder="Credits" aria-label={`Remaining credits for year ${index + 1}`} className="w-full bg-transparent text-lg font-semibold text-foreground outline-none placeholder:text-slate-400" />
+              </label>
+            ))}
+          </div>
+          <div className="mt-4 rounded-2xl bg-slate-50 dark:bg-slate-800/70 p-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Average GPA needed in remaining credits</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Uses year weights 20%, 20%, 30%, 30%</p>
+            </div>
+            <p className={`text-2xl font-black ${neededFutureGpa !== null && neededFutureGpa > 4 ? "text-rose-500" : "text-emerald-500"}`}>
+              {neededFutureGpa === null ? "—" : neededFutureGpa <= 0 ? "0.00" : neededFutureGpa > 4 ? "> 4.00" : neededFutureGpa.toFixed(2)}
+            </p>
+          </div>
+          {neededFutureGpa !== null && neededFutureGpa > 4 && <p className="mt-2 text-xs text-rose-500">This target is above the 4.00 scale based on these remaining credits.</p>}
+          {neededFutureGpa !== null && neededFutureGpa <= 0 && <p className="mt-2 text-xs text-emerald-500">Your current and planned credits already meet the First Class GPA target.</p>}
         </div>
       </section>
 
