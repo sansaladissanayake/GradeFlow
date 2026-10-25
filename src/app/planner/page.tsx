@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { swrFetcher } from "@/lib/api";
 
-type PlannedCourse = { id: string; name: string; credits: number; grade: string };
+type PlannedCourse = { id: string; name: string; credits: number };
 type PlannedSemester = { id: string; year: number; name: string; courses: PlannedCourse[] };
 
 const DEFAULT_SCALE = [
@@ -51,7 +51,6 @@ export default function PlannerPage() {
     try { return settings?.class_boundaries ? JSON.parse(settings.class_boundaries) : DEFAULT_BOUNDARIES; }
     catch { return DEFAULT_BOUNDARIES; }
   }, [settings]);
-  const gradePoint = (grade: string) => Number(gradingScale.find((item: any) => item.grade === grade)?.gpa ?? 0);
 
   const updatePlans = (next: PlannedSemester[]) => {
     setPlans(next);
@@ -60,11 +59,11 @@ export default function PlannerPage() {
   const addSemester = () => updatePlans([...plans, emptySemester(plans.at(-1)?.year ?? 1)]);
   const removeSemester = (id: string) => updatePlans(plans.filter((semester) => semester.id !== id));
   const updateSemester = (id: string, patch: Partial<PlannedSemester>) => updatePlans(plans.map((semester) => semester.id === id ? { ...semester, ...patch } : semester));
-  const addCourse = (semester: PlannedSemester) => updateSemester(semester.id, { courses: [...semester.courses, { id: crypto.randomUUID(), name: "", credits: 3, grade: gradingScale[0]?.grade ?? "A" }] });
+  const addCourse = (semester: PlannedSemester) => updateSemester(semester.id, { courses: [...semester.courses, { id: crypto.randomUUID(), name: "", credits: 3 }] });
   const updateCourse = (semester: PlannedSemester, courseId: string, patch: Partial<PlannedCourse>) => updateSemester(semester.id, { courses: semester.courses.map((course) => course.id === courseId ? { ...course, ...patch } : course) });
   const removeCourse = (semester: PlannedSemester, courseId: string) => updateSemester(semester.id, { courses: semester.courses.filter((course) => course.id !== courseId) });
 
-  const totals = [1, 2, 3, 4].map((year) => {
+  const actualTotals = [1, 2, 3, 4].map((year) => {
     let credits = 0;
     let points = 0;
     semesters.forEach((semester: any) => {
@@ -75,18 +74,20 @@ export default function PlannerPage() {
         points += (Number(subject.credits) || 0) * (Number(subject.gradePoint) || 0);
       });
     });
-    plans.filter((semester) => semester.year === year).forEach((semester) => semester.courses.forEach((course) => {
-      const courseCredits = Math.max(0, Number(course.credits) || 0);
-      credits += courseCredits;
-      points += courseCredits * gradePoint(course.grade);
-    }));
     return { year, credits, points, gpa: credits > 0 ? points / credits : 0 };
   });
-  const projectedFgpa = totals.reduce((sum, year) => sum + YEAR_WEIGHTS[year.year] * year.gpa, 0);
-  const cutoff = Number((classBoundaries.find((boundary: any) => /first/i.test(boundary.name)) ?? classBoundaries[0])?.min ?? 3.7);
-  const projectedClass = classBoundaries.find((boundary: any) => projectedFgpa >= Number(boundary.min) && projectedFgpa <= Number(boundary.max))?.name ?? (projectedFgpa >= cutoff ? "First Class" : "Below Pass");
+  const totals = actualTotals.map((actual) => ({ ...actual, plannedCredits: plans.filter((semester) => semester.year === actual.year).reduce((sum, semester) => sum + semester.courses.reduce((courseSum, course) => courseSum + Math.max(0, Number(course.credits) || 0), 0), 0) }));
   const plannedCourseCount = plans.reduce((sum, semester) => sum + semester.courses.length, 0);
   const plannedCredits = plans.reduce((sum, semester) => sum + semester.courses.reduce((courseSum, course) => courseSum + (Number(course.credits) || 0), 0), 0);
+  const projectedForGrade = (estimate: number) => totals.reduce((sum, year) => {
+    const allCredits = year.credits + year.plannedCredits;
+    const allPoints = year.points + year.plannedCredits * estimate;
+    return sum + YEAR_WEIGHTS[year.year] * (allCredits > 0 ? allPoints / allCredits : 0);
+  }, 0);
+  const cutoff = Number((classBoundaries.find((boundary: any) => /first/i.test(boundary.name)) ?? classBoundaries[0])?.min ?? 3.7);
+  const sortedGrades = [...gradingScale].sort((a: any, b: any) => Number(a.gpa) - Number(b.gpa));
+  const requiredGrade = plannedCredits > 0 ? sortedGrades.find((grade: any) => projectedForGrade(Number(grade.gpa)) >= cutoff) : null;
+  const projectedAtRequirement = requiredGrade ? projectedForGrade(Number(requiredGrade.gpa)) : null;
 
   return (
     <main className="flex-1 w-full max-w-2xl mx-auto p-4 sm:p-6 pb-28">
@@ -96,18 +97,19 @@ export default function PlannerPage() {
       </header>
 
       <section className="glass-card rounded-3xl p-5 mb-5">
-        <div className="flex justify-between items-start gap-3"><div><p className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">Projected final GPA</p><h2 className="text-5xl font-black text-foreground mt-1">{projectedFgpa.toFixed(2)}</h2></div><span className="rounded-xl bg-emerald-500/10 px-3 py-2 text-sm font-bold text-emerald-500">{projectedClass}</span></div>
+        <div className="flex justify-between items-start gap-3"><div><p className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">First Class target</p><h2 className="text-5xl font-black text-foreground mt-1">{cutoff.toFixed(2)}</h2></div><div className="text-right"><p className="text-xs text-slate-500 dark:text-slate-400">Minimum grade to aim for</p><span className="text-2xl font-black text-emerald-500">{requiredGrade?.grade ?? (plannedCredits ? "Not reachable" : "Add courses")}</span></div></div>
+        {plannedCredits > 0 && <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">If you earn at least {requiredGrade?.grade ?? "the highest grade"} in each planned course, your estimated final GPA is {projectedAtRequirement?.toFixed(2)}{!requiredGrade ? "; the First Class target cannot be reached with the current credits" : "."}</p>}
         <div className="mt-5 grid grid-cols-2 gap-3">
           <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/70 p-3"><p className="text-xs text-slate-500 dark:text-slate-400">Planned courses</p><p className="text-xl font-bold mt-1">{plannedCourseCount}</p></div>
           <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/70 p-3"><p className="text-xs text-slate-500 dark:text-slate-400">Planned credits</p><p className="text-xl font-bold mt-1">{plannedCredits}</p></div>
         </div>
         <div className="mt-4 grid grid-cols-4 gap-2">
-          {totals.map((item) => <div key={item.year} className="rounded-xl bg-slate-50 dark:bg-slate-800/70 p-2 text-center"><p className="text-[10px] text-slate-500 dark:text-slate-400">Year {item.year} · {YEAR_WEIGHTS[item.year] * 100}%</p><p className="font-bold mt-1">{item.gpa.toFixed(2)}</p></div>)}
+          {totals.map((item) => <div key={item.year} className="rounded-xl bg-slate-50 dark:bg-slate-800/70 p-2 text-center"><p className="text-[10px] text-slate-500 dark:text-slate-400">Year {item.year} · {YEAR_WEIGHTS[item.year] * 100}%</p><p className="font-bold mt-1">{item.plannedCredits + item.credits > 0 ? (projectedAtRequirement === null ? (item.credits ? item.gpa.toFixed(2) : "—") : ((item.points + item.plannedCredits * Number(requiredGrade?.gpa ?? 0)) / (item.credits + item.plannedCredits)).toFixed(2)) : "—"}</p></div>)}
         </div>
       </section>
 
       {!ready ? <div className="glass-panel rounded-2xl p-8 text-center text-slate-500">Loading planner…</div> : plans.length === 0 ? (
-        <section className="glass-card rounded-3xl p-8 text-center"><p className="text-4xl mb-3">✦</p><h2 className="text-lg font-bold">Start a what-if plan</h2><p className="text-sm text-slate-500 dark:text-slate-400 mt-2 mb-5">Add your remaining semesters, courses, credits, and expected grades. Your estimates stay separate from your academic record.</p><button onClick={addSemester} className="rounded-xl bg-primary-600 text-white px-5 py-3 font-semibold">Add a semester</button></section>
+        <section className="glass-card rounded-3xl p-8 text-center"><p className="text-4xl mb-3">✦</p><h2 className="text-lg font-bold">Start a what-if plan</h2><p className="text-sm text-slate-500 dark:text-slate-400 mt-2 mb-5">Add your remaining semesters and course credits. GradeFlow will calculate the lowest grade you need to target. Plans stay separate from your academic record.</p><button onClick={addSemester} className="rounded-xl bg-primary-600 text-white px-5 py-3 font-semibold">Add a semester</button></section>
       ) : (
         <section className="space-y-4">
           {plans.map((semester) => <article key={semester.id} className="glass-card rounded-3xl p-4 sm:p-5">
@@ -117,10 +119,9 @@ export default function PlannerPage() {
               <button onClick={() => removeSemester(semester.id)} aria-label="Remove semester" className="p-2 text-slate-400 hover:text-rose-500">✕</button>
             </div>
             <div className="space-y-2">
-              {semester.courses.map((course) => <div key={course.id} className="grid grid-cols-[minmax(0,1fr)_4.5rem_5rem_2rem] sm:grid-cols-[minmax(0,1fr)_5rem_6rem_2rem] gap-2 items-center">
+              {semester.courses.map((course) => <div key={course.id} className="grid grid-cols-[minmax(0,1fr)_4.5rem_2rem] sm:grid-cols-[minmax(0,1fr)_5rem_2rem] gap-2 items-center">
                 <input value={course.name} onChange={(event) => updateCourse(semester, course.id, { name: event.target.value })} placeholder="Course name" aria-label="Course name" className="min-w-0 rounded-xl bg-slate-50 dark:bg-slate-800/70 px-3 py-2.5 text-sm outline-none" />
                 <input type="number" min="0" step="0.5" value={course.credits} onChange={(event) => updateCourse(semester, course.id, { credits: Number(event.target.value) })} aria-label="Course credits" className="w-full rounded-xl bg-slate-50 dark:bg-slate-800/70 px-2 py-2.5 text-sm text-center outline-none" />
-                <select value={course.grade} onChange={(event) => updateCourse(semester, course.id, { grade: event.target.value })} aria-label="Estimated grade" className="w-full rounded-xl bg-slate-50 dark:bg-slate-800/70 px-2 py-2.5 text-sm font-semibold outline-none">{gradingScale.map((item: any) => <option key={item.grade} value={item.grade}>{item.grade}</option>)}</select>
                 <button onClick={() => removeCourse(semester, course.id)} aria-label="Remove course" className="text-slate-400 hover:text-rose-500">✕</button>
               </div>)}
             </div>
