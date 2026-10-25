@@ -15,8 +15,9 @@ const DEFAULT_GRADING_SCALE = [
   { grade: "C+", gpa: "2.30" },
   { grade: "C", gpa: "2.00" },
   { grade: "C-", gpa: "1.70" },
+  { grade: "D+", gpa: "1.30" },
   { grade: "D", gpa: "1.00" },
-  { grade: "F", gpa: "0.00" }
+  { grade: "E", gpa: "0.00" }
 ];
 
 const DEFAULT_CLASS_BOUNDARIES = [
