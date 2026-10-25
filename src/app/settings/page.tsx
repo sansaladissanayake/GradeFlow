@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getSettings, saveSettings } from "@/lib/api";
+import useSWR from "swr";
+import { getSettings, saveSettings, swrFetcher } from "@/lib/api";
 
 const DEFAULT_GRADING_SCALE = [
   { grade: "A+", gpa: "4.00" },
@@ -32,7 +33,6 @@ export default function SettingsPage() {
   const [gradingScale, setGradingScale] = useState(DEFAULT_GRADING_SCALE);
   const [classBoundaries, setClassBoundaries] = useState(DEFAULT_CLASS_BOUNDARIES);
   
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
   // Modals state
@@ -45,35 +45,55 @@ export default function SettingsPage() {
   const [newClassMin, setNewClassMin] = useState("");
   const [newClassMax, setNewClassMax] = useState("");
 
+  const [userId, setUserId] = useState<string | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
+
   useEffect(() => {
-    const fetchUserConfig = async () => {
-      const userId = localStorage.getItem("gradeflow_user_id");
-      if (!userId) return;
-      
-      try {
-        const res = await getSettings(userId);
-        if (res.status === "success" && res.data) {
-          if (res.data.grading_scale) setGradingScale(JSON.parse(res.data.grading_scale));
-          if (res.data.class_boundaries) setClassBoundaries(JSON.parse(res.data.class_boundaries));
-        }
-      } catch (e) {
-        console.error("Failed to load settings", e);
-      }
-      setLoading(false);
-    };
-    fetchUserConfig();
+    setUserId(localStorage.getItem("gradeflow_user_id"));
+    const savedTheme = localStorage.getItem("gradeflow_theme");
+    const initialTheme = savedTheme === "light" ? "light" : "dark";
+    setTheme(initialTheme);
+    document.documentElement.classList.toggle("dark", initialTheme === "dark");
   }, []);
+
+  const changeTheme = (nextTheme: "light" | "dark") => {
+    setTheme(nextTheme);
+    localStorage.setItem("gradeflow_theme", nextTheme);
+    document.documentElement.classList.toggle("dark", nextTheme === "dark");
+  };
+
+  const { data: settings, isLoading: loading, mutate: mutateSettings } = useSWR(
+    userId ? ["getSettings", userId] : null,
+    swrFetcher
+  );
+
+  // Sync SWR data to local state for editing
+  useEffect(() => {
+    if (settings) {
+      if (settings.grading_scale) setGradingScale(JSON.parse(settings.grading_scale));
+      if (settings.class_boundaries) setClassBoundaries(JSON.parse(settings.class_boundaries));
+    }
+  }, [settings]);
 
   const handleSaveAll = async () => {
     setSaving(true);
     const userId = localStorage.getItem("gradeflow_user_id");
     if (!userId) return;
     
+    // OPTIMISTIC UPDATE
+    mutateSettings({
+      ...settings,
+      grading_scale: JSON.stringify(gradingScale),
+      class_boundaries: JSON.stringify(classBoundaries)
+    }, false);
+    
     try {
       await saveSettings(userId, JSON.stringify(gradingScale), JSON.stringify(classBoundaries));
       alert("Settings saved successfully!");
+      mutateSettings(); // Revalidate from server
     } catch (e) {
       alert("Failed to save settings.");
+      mutateSettings(); // Revalidate from server
     }
     setSaving(false);
   };
@@ -233,6 +253,15 @@ export default function SettingsPage() {
             </button>
           </div>
         )}
+      </section>
+
+      <section className="mt-6 relative z-10">
+        <div className="glass-card rounded-3xl p-5">
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-4">Appearance</h2>
+          <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1" role="group" aria-label="Color theme">
+            {(["light", "dark"] as const).map((option) => <button key={option} onClick={() => changeTheme(option)} aria-pressed={theme === option} className={`flex-1 rounded-lg py-2.5 text-sm font-semibold capitalize transition-colors ${theme === option ? "bg-white dark:bg-slate-700 text-primary-600 shadow-sm" : "text-slate-500 dark:text-slate-400"}`}>{option}</button>)}
+          </div>
+        </div>
       </section>
 
       {/* Account Section */}

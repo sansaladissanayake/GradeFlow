@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getSemesters, getSubjects, getSettings } from "@/lib/api";
+import useSWR from "swr";
+import { swrFetcher } from "@/lib/api";
 
 const DEFAULT_CLASS_BOUNDARIES = [
   { name: "First Class", min: "3.70", max: "4.00" },
@@ -12,124 +13,99 @@ const DEFAULT_CLASS_BOUNDARIES = [
 ];
 
 export default function Dashboard() {
+  const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState("Student");
-  
-  const [overallGpa, setOverallGpa] = useState("0.00");
-  const [totalCredits, setTotalCredits] = useState(0);
-  const [currentClass, setCurrentClass] = useState("Unclassified");
-  const [targetClass, setTargetClass] = useState("First Class");
-  const [targetGpa, setTargetGpa] = useState(3.70);
-  
-  const [recentSemesters, setRecentSemesters] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [gpaMode, setGpaMode] = useState<"normal" | "weighted">("normal");
 
   useEffect(() => {
+    setUserId(localStorage.getItem("gradeflow_user_id"));
     const name = localStorage.getItem("gradeflow_user_name");
     if (name) setUserName(name);
-    
-    const fetchData = async () => {
-      const userId = localStorage.getItem("gradeflow_user_id");
-      if (!userId) { 
-        setLoading(false); 
-        return; 
-      }
-      
-      try {
-        const [semRes, subRes, settingsRes] = await Promise.all([
-          getSemesters(userId),
-          getSubjects(userId),
-          getSettings(userId)
-        ]);
-        
-        let semesters = [];
-        let subjects = [];
-        
-        if (semRes.status === "success" && semRes.data) semesters = semRes.data;
-        if (subRes.status === "success" && subRes.data) subjects = subRes.data;
-        
-        let boundaries = DEFAULT_CLASS_BOUNDARIES;
-        if (settingsRes.status === "success" && settingsRes.data?.class_boundaries) {
-          boundaries = JSON.parse(settingsRes.data.class_boundaries);
-        }
-        
-        // Calculate overall stats
-        let tCredits = 0;
-        let tPoints = 0;
-        
-        subjects.forEach((s: any) => {
-          if (s.grade !== "Pending") {
-            tCredits += Number(s.credits);
-            tPoints += Number(s.credits) * Number(s.gradePoint);
-          }
-        });
-        
-        const cgpa = tCredits > 0 ? (tPoints / tCredits).toFixed(2) : "0.00";
-        setTotalCredits(tCredits);
-        setOverallGpa(cgpa);
-        
-        const cgpaNum = parseFloat(cgpa);
-        
-        // Sort boundaries from highest to lowest
-        const sortedBoundaries = [...boundaries].sort((a, b) => parseFloat(b.max) - parseFloat(a.max));
-        
-        // Determine Current Class
-        if (tCredits === 0) {
-          setCurrentClass("Unclassified");
-        } else {
-          let foundClass = "Fail";
-          for (const b of sortedBoundaries) {
-            if (cgpaNum >= parseFloat(b.min)) {
-              foundClass = b.name;
-              break;
-            }
-          }
-          setCurrentClass(foundClass);
-        }
-        
-        // Determine Target Class (Next highest boundary)
-        let nextTarget = sortedBoundaries[0]; // Highest class default
-        if (sortedBoundaries.length > 0) {
-          for (let i = sortedBoundaries.length - 1; i >= 0; i--) {
-             if (cgpaNum < parseFloat(sortedBoundaries[i].min)) {
-                nextTarget = sortedBoundaries[i];
-                break;
-             }
-          }
-          setTargetClass(nextTarget.name);
-          setTargetGpa(parseFloat(nextTarget.min));
-        }
-
-        // Calculate per-semester stats
-        const semStats = semesters.map((sem: any) => {
-          const semSubs = subjects.filter((s: any) => String(s.semester_id) === String(sem.id));
-          let sCredits = 0;
-          let sPoints = 0;
-          semSubs.forEach((s: any) => {
-            if (s.grade !== "Pending") {
-              sCredits += Number(s.credits);
-              sPoints += Number(s.credits) * Number(s.gradePoint);
-            }
-          });
-          return {
-            id: sem.id,
-            name: `${sem.academic_year} - ${sem.name}`,
-            credits: sCredits,
-            gpa: sCredits > 0 ? (sPoints / sCredits).toFixed(2) : "0.00"
-          };
-        });
-        
-        // Sort newest first
-        semStats.sort((a: any, b: any) => String(b.id).localeCompare(String(a.id)));
-        setRecentSemesters(semStats.slice(0, 2));
-        
-      } catch (err) {
-        console.error("Dashboard fetch error:", err);
-      }
-      setLoading(false);
-    };
-    
-    fetchData();
+    setGpaMode(localStorage.getItem("gradeflow_gpa_mode") === "weighted" ? "weighted" : "normal");
   }, []);
+
+  const { data: semesters = [], isLoading: semLoading } = useSWR(userId ? ["getSemesters", userId] : null, swrFetcher);
+  const { data: subjects = [], isLoading: subLoading } = useSWR(userId ? ["getSubjects", userId] : null, swrFetcher);
+  const { data: settings, isLoading: setLoading } = useSWR(userId ? ["getSettings", userId] : null, swrFetcher);
+
+  const loading = !userId || semLoading || subLoading || setLoading;
+
+  // Process data if loaded
+  let boundaries = DEFAULT_CLASS_BOUNDARIES;
+  if (settings?.class_boundaries) {
+    boundaries = JSON.parse(settings.class_boundaries);
+  }
+
+  let tCredits = 0;
+  let tPoints = 0;
+  const yearCredits = new Map<number, number>();
+  const yearPoints = new Map<number, number>();
+
+  subjects.forEach((s: any) => {
+    if (s.grade !== "Pending") {
+      tCredits += Number(s.credits);
+      tPoints += Number(s.credits) * Number(s.gradePoint);
+      const semester = semesters.find((sem: any) => String(sem.id) === String(s.semester_id));
+      const yearLabel = String(semester?.academic_year ?? "");
+      const match = yearLabel.match(/\d+/);
+      const year = match ? Number(match[0]) : NaN;
+      if (year >= 1 && year <= 4) {
+        yearCredits.set(year, (yearCredits.get(year) ?? 0) + Number(s.credits));
+        yearPoints.set(year, (yearPoints.get(year) ?? 0) + Number(s.credits) * Number(s.gradePoint));
+      }
+    }
+  });
+
+  const yearWeights = [0, 0.2, 0.2, 0.3, 0.3];
+  const yearlyGpa = (year: number) => (yearCredits.get(year) ?? 0) > 0 ? (yearPoints.get(year) ?? 0) / (yearCredits.get(year) ?? 1) : 0;
+  const weightedGpa = [1, 2, 3, 4].reduce((sum, year) => sum + yearWeights[year] * yearlyGpa(year), 0);
+  const overallGpa = (gpaMode === "weighted" ? weightedGpa : tCredits > 0 ? tPoints / tCredits : 0).toFixed(2);
+  const cgpaNum = parseFloat(overallGpa);
+
+  const sortedBoundaries = [...boundaries].sort((a, b) => parseFloat(b.max) - parseFloat(a.max));
+
+  let currentClass = "Unclassified";
+  if (tCredits > 0) {
+    currentClass = "Fail";
+    for (const b of sortedBoundaries) {
+      if (cgpaNum >= parseFloat(b.min)) {
+        currentClass = b.name;
+        break;
+      }
+    }
+  }
+
+  let targetClass = sortedBoundaries.length > 0 ? sortedBoundaries[0].name : "First Class";
+  let targetGpa = sortedBoundaries.length > 0 ? parseFloat(sortedBoundaries[0].min) : 3.70;
+  if (sortedBoundaries.length > 0) {
+    for (let i = sortedBoundaries.length - 1; i >= 0; i--) {
+      if (cgpaNum < parseFloat(sortedBoundaries[i].min)) {
+        targetClass = sortedBoundaries[i].name;
+        targetGpa = parseFloat(sortedBoundaries[i].min);
+        break;
+      }
+    }
+  }
+
+  const semStats = semesters.map((sem: any) => {
+    const semSubs = subjects.filter((s: any) => String(s.semester_id) === String(sem.id));
+    let sCredits = 0;
+    let sPoints = 0;
+    semSubs.forEach((s: any) => {
+      if (s.grade !== "Pending") {
+        sCredits += Number(s.credits);
+        sPoints += Number(s.credits) * Number(s.gradePoint);
+      }
+    });
+    return {
+      id: sem.id,
+      name: `${sem.academic_year} - ${sem.name}`,
+      credits: sCredits,
+      gpa: sCredits > 0 ? (sPoints / sCredits).toFixed(2) : "0.00"
+    };
+  }).sort((a: any, b: any) => String(b.id).localeCompare(String(a.id)));
+
+  const recentSemesters = semStats.slice(0, 2);
 
   return (
     <main className="flex-1 p-6 relative overflow-x-hidden pb-24">
@@ -153,10 +129,15 @@ export default function Dashboard() {
 
       {/* Main CGPA Card */}
       <section className="mb-6 relative z-10">
+        <div className="flex justify-end mb-3">
+          <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1" role="group" aria-label="GPA calculation mode">
+            {(["normal", "weighted"] as const).map((mode) => <button key={mode} onClick={() => { setGpaMode(mode); localStorage.setItem("gradeflow_gpa_mode", mode); }} aria-pressed={gpaMode === mode} className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize transition-colors ${gpaMode === mode ? "bg-white dark:bg-slate-700 text-primary-600 shadow-sm" : "text-slate-500 dark:text-slate-400"}`}>{mode}</button>)}
+          </div>
+        </div>
         <div className="glass-card rounded-3xl p-6 text-center relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-primary-500/20 to-transparent rounded-bl-full" />
           
-          <p className="text-slate-500 dark:text-slate-400 font-medium text-sm tracking-wider uppercase mb-1">Overall CGPA</p>
+          <p className="text-slate-500 dark:text-slate-400 font-medium text-sm tracking-wider uppercase mb-1">{gpaMode === "weighted" ? "Weighted GPA" : "Overall GPA"}</p>
           {loading ? (
             <div className="h-12 w-24 bg-slate-200 dark:bg-slate-800 animate-pulse rounded-lg mx-auto mb-4" />
           ) : (
@@ -165,7 +146,7 @@ export default function Dashboard() {
           
           <div className="flex justify-between items-center text-sm">
             <div className="bg-primary-50 dark:bg-slate-800/80 px-4 py-2 rounded-2xl flex items-center gap-1">
-              <span className="text-primary-600 dark:text-primary-400 font-semibold">{totalCredits}</span>
+              <span className="text-primary-600 dark:text-primary-400 font-semibold">{tCredits}</span>
               <span className="text-slate-500 dark:text-slate-400">Credits</span>
             </div>
             <div className="bg-accent-50 dark:bg-slate-800/80 px-4 py-2 rounded-2xl">
@@ -219,7 +200,7 @@ export default function Dashboard() {
               No semesters added yet.
             </div>
           ) : (
-            recentSemesters.map((sem, i) => (
+            recentSemesters.map((sem: any, i: number) => (
               <Link href={`/semesters/${sem.id}`} key={i} className="block">
                 <div className="glass-panel p-4 rounded-2xl flex justify-between items-center shadow-sm hover:shadow-md transition-shadow cursor-pointer">
                   <div>
