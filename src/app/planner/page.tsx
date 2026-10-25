@@ -6,6 +6,11 @@ import { swrFetcher } from "@/lib/api";
 
 type PlannedCourse = { id: string; name: string; credits: number };
 type PlannedSemester = { id: string; year: number; name: string; courses: PlannedCourse[] };
+type GradeOption = { grade: string; gpa: number | string };
+type ClassBoundary = { name: string; min: number | string; max: number | string };
+type AcademicSemester = { id: string; academic_year: string };
+type AcademicSubject = { semester_id: string; grade: string; credits: number; gradePoint: number };
+type PlannerSettings = { grading_scale?: string; class_boundaries?: string };
 
 const DEFAULT_SCALE = [
   { grade: "A+", gpa: 4 }, { grade: "A", gpa: 4 }, { grade: "A-", gpa: 3.7 },
@@ -31,6 +36,8 @@ export default function PlannerPage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    // Browser-only data is restored after hydration to avoid server/client mismatches.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setUserId(localStorage.getItem("gradeflow_user_id"));
     try {
       const stored = localStorage.getItem("gradeflow_planned_semesters");
@@ -39,16 +46,16 @@ export default function PlannerPage() {
     setReady(true);
   }, []);
 
-  const { data: semesters = [] } = useSWR(userId ? ["getSemesters", userId] : null, swrFetcher);
-  const { data: subjects = [] } = useSWR(userId ? ["getSubjects", userId] : null, swrFetcher);
-  const { data: settings } = useSWR(userId ? ["getSettings", userId] : null, swrFetcher);
+  const { data: semesters = [] } = useSWR<AcademicSemester[]>(userId ? ["getSemesters", userId] : null, swrFetcher);
+  const { data: subjects = [] } = useSWR<AcademicSubject[]>(userId ? ["getSubjects", userId] : null, swrFetcher);
+  const { data: settings } = useSWR<PlannerSettings>(userId ? ["getSettings", userId] : null, swrFetcher);
 
-  const gradingScale = useMemo(() => {
-    try { return settings?.grading_scale ? JSON.parse(settings.grading_scale) : DEFAULT_SCALE; }
+  const gradingScale: GradeOption[] = useMemo(() => {
+    try { return settings?.grading_scale ? JSON.parse(settings.grading_scale) as GradeOption[] : DEFAULT_SCALE; }
     catch { return DEFAULT_SCALE; }
   }, [settings]);
-  const classBoundaries = useMemo(() => {
-    try { return settings?.class_boundaries ? JSON.parse(settings.class_boundaries) : DEFAULT_BOUNDARIES; }
+  const classBoundaries: ClassBoundary[] = useMemo(() => {
+    try { return settings?.class_boundaries ? JSON.parse(settings.class_boundaries) as ClassBoundary[] : DEFAULT_BOUNDARIES; }
     catch { return DEFAULT_BOUNDARIES; }
   }, [settings]);
 
@@ -66,10 +73,10 @@ export default function PlannerPage() {
   const actualTotals = [1, 2, 3, 4].map((year) => {
     let credits = 0;
     let points = 0;
-    semesters.forEach((semester: any) => {
+    semesters.forEach((semester) => {
       const semesterYear = Number(String(semester.academic_year ?? "").match(/\d+/)?.[0]);
       if (semesterYear !== year) return;
-      subjects.filter((subject: any) => String(subject.semester_id) === String(semester.id) && subject.grade !== "Pending").forEach((subject: any) => {
+      subjects.filter((subject) => String(subject.semester_id) === String(semester.id) && subject.grade !== "Pending").forEach((subject) => {
         credits += Number(subject.credits) || 0;
         points += (Number(subject.credits) || 0) * (Number(subject.gradePoint) || 0);
       });
@@ -84,10 +91,12 @@ export default function PlannerPage() {
     const allPoints = year.points + year.plannedCredits * estimate;
     return sum + YEAR_WEIGHTS[year.year] * (allCredits > 0 ? allPoints / allCredits : 0);
   }, 0);
-  const cutoff = Number((classBoundaries.find((boundary: any) => /first/i.test(boundary.name)) ?? classBoundaries[0])?.min ?? 3.7);
-  const sortedGrades = [...gradingScale].sort((a: any, b: any) => Number(a.gpa) - Number(b.gpa));
-  const requiredGrade = plannedCredits > 0 ? sortedGrades.find((grade: any) => projectedForGrade(Number(grade.gpa)) >= cutoff) : null;
+  const cutoff = Number((classBoundaries.find((boundary) => /first/i.test(boundary.name)) ?? classBoundaries[0])?.min ?? 3.7);
+  const sortedGrades = [...gradingScale].sort((a, b) => Number(a.gpa) - Number(b.gpa));
+  const topGrade = sortedGrades.at(-1);
+  const requiredGrade = plannedCredits > 0 ? sortedGrades.find((grade) => projectedForGrade(Number(grade.gpa)) >= cutoff) : null;
   const projectedAtRequirement = requiredGrade ? projectedForGrade(Number(requiredGrade.gpa)) : null;
+  const bestPossibleFgpa = plannedCredits > 0 && topGrade ? projectedForGrade(Number(topGrade.gpa)) : null;
 
   return (
     <main className="flex-1 w-full max-w-2xl mx-auto p-4 sm:p-6 pb-28">
@@ -98,7 +107,7 @@ export default function PlannerPage() {
 
       <section className="glass-card rounded-3xl p-5 mb-5">
         <div className="flex justify-between items-start gap-3"><div><p className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">First Class target</p><h2 className="text-5xl font-black text-foreground mt-1">{cutoff.toFixed(2)}</h2></div><div className="text-right"><p className="text-xs text-slate-500 dark:text-slate-400">Minimum grade to aim for</p><span className="text-2xl font-black text-emerald-500">{requiredGrade?.grade ?? (plannedCredits ? "Not reachable" : "Add courses")}</span></div></div>
-        {plannedCredits > 0 && <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">If you earn at least {requiredGrade?.grade ?? "the highest grade"} in each planned course, your estimated final GPA is {projectedAtRequirement?.toFixed(2)}{!requiredGrade ? "; the First Class target cannot be reached with the current credits" : "."}</p>}
+        {plannedCredits > 0 && <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{requiredGrade ? `Aim for at least ${requiredGrade.grade} in every planned course to project a final GPA of ${projectedAtRequirement?.toFixed(2)}.` : `Even ${topGrade?.grade ?? "your highest grade"} in every planned course projects a final GPA of ${bestPossibleFgpa?.toFixed(2)}, below the First Class cutoff.`}</p>}
         <div className="mt-5 grid grid-cols-2 gap-3">
           <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/70 p-3"><p className="text-xs text-slate-500 dark:text-slate-400">Planned courses</p><p className="text-xl font-bold mt-1">{plannedCourseCount}</p></div>
           <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/70 p-3"><p className="text-xs text-slate-500 dark:text-slate-400">Planned credits</p><p className="text-xl font-bold mt-1">{plannedCredits}</p></div>
@@ -123,6 +132,7 @@ export default function PlannerPage() {
                 <input value={course.name} onChange={(event) => updateCourse(semester, course.id, { name: event.target.value })} placeholder="Course name" aria-label="Course name" className="min-w-0 rounded-xl bg-slate-50 dark:bg-slate-800/70 px-3 py-2.5 text-sm outline-none" />
                 <input type="number" min="0" step="0.5" value={course.credits} onChange={(event) => updateCourse(semester, course.id, { credits: Number(event.target.value) })} aria-label="Course credits" className="w-full rounded-xl bg-slate-50 dark:bg-slate-800/70 px-2 py-2.5 text-sm text-center outline-none" />
                 <button onClick={() => removeCourse(semester, course.id)} aria-label="Remove course" className="text-slate-400 hover:text-rose-500">✕</button>
+                <p className="col-span-3 -mt-1 px-3 text-xs text-slate-500 dark:text-slate-400">Minimum target: <span className="font-bold text-emerald-500">{plannedCredits > 0 ? requiredGrade?.grade ?? `Above ${topGrade?.grade ?? "scale"} needed` : "Add course credits"}</span></p>
               </div>)}
             </div>
             <button onClick={() => addCourse(semester)} className="mt-3 text-sm font-semibold text-primary-500">+ Add course</button>
