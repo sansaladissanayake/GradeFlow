@@ -63,6 +63,16 @@ async function localBackend(action: string, data: any) {
       localStorage.setItem(`gradeflow_db_settings`, JSON.stringify(settings));
       return { status: "success" };
     }
+    case 'getPlanner': {
+      const planners = getDB('planner');
+      return { status: "success", data: planners[data.user_id] || [], localOnly: true };
+    }
+    case 'savePlanner': {
+      const planners = getDB('planner');
+      planners[data.user_id] = JSON.parse(data.plans || '[]');
+      localStorage.setItem('gradeflow_db_planner', JSON.stringify(planners));
+      return { status: "success", data: planners[data.user_id], localOnly: true };
+    }
     default:
       return { status: "error", message: "Unknown action" };
   }
@@ -132,6 +142,10 @@ export async function getSettings(userId: string) {
 
 export async function saveSettings(userId: string, gradingScale: string, classBoundaries: string) {
   return fetchFromAPI('saveSettings', { user_id: userId, grading_scale: gradingScale, class_boundaries: classBoundaries });
+}
+
+export async function savePlanner(userId: string, plans: unknown[]) {
+  return fetchFromAPI('savePlanner', { user_id: userId, plans: JSON.stringify(plans) });
 }
 
 export const swrFetcher = async ([action, userId]: [string, string]) => {

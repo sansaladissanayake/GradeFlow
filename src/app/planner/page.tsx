@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import { swrFetcher } from "@/lib/api";
+import { fetchFromAPI, savePlanner, swrFetcher } from "@/lib/api";
 
 type PlannedCourse = { id: string; name: string; credits: number };
 type PlannedSemester = { id: string; year: number; name: string; courses: PlannedCourse[] };
@@ -34,6 +34,9 @@ export default function PlannerPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [plans, setPlans] = useState<PlannedSemester[]>([]);
   const [ready, setReady] = useState(false);
+  const [remoteReady, setRemoteReady] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<"loading" | "synced" | "device" | "saving" | "error">("loading");
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     // Browser-only data is restored after hydration to avoid server/client mismatches.
@@ -49,6 +52,33 @@ export default function PlannerPage() {
   const { data: semesters = [] } = useSWR<AcademicSemester[]>(userId ? ["getSemesters", userId] : null, swrFetcher);
   const { data: subjects = [] } = useSWR<AcademicSubject[]>(userId ? ["getSubjects", userId] : null, swrFetcher);
   const { data: settings } = useSWR<PlannerSettings>(userId ? ["getSettings", userId] : null, swrFetcher);
+  const { data: plannerResult, error: plannerError } = useSWR(userId ? ["getPlanner", userId] : null, async ([, id]: [string, string]) => {
+    const result = await fetchFromAPI("getPlanner", { user_id: id });
+    if (result.status !== "success") throw new Error(result.message || "Planner could not be loaded");
+    return result;
+  });
+
+  useEffect(() => {
+    if (!ready || !userId) return;
+    if (plannerError) {
+      // Reflect the failed network sync while preserving the editable local copy.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSyncStatus("error");
+      return;
+    }
+    if (!plannerResult || remoteReady) return;
+    const cloudPlans = Array.isArray(plannerResult.data) ? plannerResult.data as PlannedSemester[] : [];
+    if (cloudPlans.length > 0) {
+      setPlans(cloudPlans);
+      localStorage.setItem("gradeflow_planned_semesters", JSON.stringify(cloudPlans));
+    } else if (plans.length > 0 && !plannerResult.localOnly) {
+      void savePlanner(userId, plans).then((result) => setSyncStatus(result.localOnly ? "device" : "synced")).catch(() => setSyncStatus("error"));
+    }
+    setRemoteReady(true);
+    setSyncStatus(plannerResult.localOnly ? "device" : "synced");
+  // Hydrate the locally saved plan once, then keep the cloud copy authoritative.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, userId, plannerResult, plannerError, remoteReady]);
 
   const gradingScale: GradeOption[] = useMemo(() => {
     try { return settings?.grading_scale ? JSON.parse(settings.grading_scale) as GradeOption[] : DEFAULT_SCALE; }
@@ -62,6 +92,13 @@ export default function PlannerPage() {
   const updatePlans = (next: PlannedSemester[]) => {
     setPlans(next);
     localStorage.setItem("gradeflow_planned_semesters", JSON.stringify(next));
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    if (userId && remoteReady) {
+      setSyncStatus("saving");
+      saveTimer.current = setTimeout(() => {
+        void savePlanner(userId, next).then((result) => setSyncStatus(result.localOnly ? "device" : "synced")).catch(() => setSyncStatus("error"));
+      }, 500);
+    }
   };
   const addSemester = () => updatePlans([...plans, emptySemester(plans.at(-1)?.year ?? 1)]);
   const removeSemester = (id: string) => updatePlans(plans.filter((semester) => semester.id !== id));
@@ -104,6 +141,8 @@ export default function PlannerPage() {
         <div><p className="text-xs uppercase tracking-[0.18em] text-primary-500 font-bold">What if</p><h1 className="text-3xl font-black text-foreground mt-1">GPA Planner</h1><p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Plan semesters and estimate your final GPA.</p></div>
         <button onClick={addSemester} className="rounded-2xl bg-primary-600 text-white px-4 py-3 font-bold shadow-lg shadow-primary-600/20">+ Semester</button>
       </header>
+
+      <p className="mb-4 text-xs text-right text-slate-500 dark:text-slate-400">{syncStatus === "loading" ? "Loading saved plan…" : syncStatus === "saving" ? "Saving plan…" : syncStatus === "synced" ? "Synced to your account" : syncStatus === "device" ? "Saved on this device only · update Apps Script to sync across devices" : "Could not sync · saved on this device"}</p>
 
       <section className="glass-card rounded-3xl p-5 mb-5">
         <div className="flex justify-between items-start gap-3"><div><p className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">First Class target</p><h2 className="text-5xl font-black text-foreground mt-1">{cutoff.toFixed(2)}</h2></div><div className="text-right"><p className="text-xs text-slate-500 dark:text-slate-400">Minimum grade to aim for</p><span className="text-2xl font-black text-emerald-500">{requiredGrade?.grade ?? (plannedCredits ? "Not reachable" : "Add courses")}</span></div></div>
